@@ -11,6 +11,11 @@
   },
   "files.associations": {
     "ui.h": "c",
-    "string.h": "c"
+    "string.h": "c",
+    "adc.h": "c",
+    "display.h": "c",
+    "battery_ui.h": "c",
+    "fonts.h": "c",
+    "stdio.h": "c"
   }
 }

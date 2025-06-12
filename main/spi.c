@@ -1,6 +1,13 @@
 #include "spi.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "esp_log_level.h"
+#include "sdkconfig.h"
+#include "driver/spi_master.h"
+
+#ifndef CONFIG_LOG_MAXIMUM_LEVEL
+#define CONFIG_LOG_MAXIMUM_LEVEL ESP_LOG_VERBOSE
+#endif
 
 static spi_device_handle_t spi_handle;
 static const char* TAG = "SPI";
@@ -22,8 +29,8 @@ void spi_init(void) {
         .queue_size = 7,
     };
 
-    ESP_ERROR_CHECK(spi_bus_initialize(HSPI_HOST, &buscfg, SPI_DMA_CH_AUTO));
-    ESP_ERROR_CHECK(spi_bus_add_device(HSPI_HOST, &devcfg, &spi_handle));
+    ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
+    ESP_ERROR_CHECK(spi_bus_add_device(SPI2_HOST, &devcfg, &spi_handle));
     
     ESP_LOGI(TAG, "SPI inicializado correctamente");
 }

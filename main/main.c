@@ -1,6 +1,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "adc.h"
+#include "adcfunction.h"  
 #include "battery_ui.h"
 #include "display.h"
 
