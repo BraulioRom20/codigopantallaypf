@@ -1,2 +1,1 @@
-Codigo hasta ahora
-(16 errores contados, ayuda)
+Código del Display de la Computadora en el Auto.
