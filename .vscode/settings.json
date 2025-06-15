@@ -16,6 +16,7 @@
     "display.h": "c",
     "battery_ui.h": "c",
     "fonts.h": "c",
-    "stdio.h": "c"
+    "stdio.h": "c",
+    "esp_log.h": "c"
   }
 }

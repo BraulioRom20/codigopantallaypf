@@ -62,11 +62,11 @@ float read_current(void) {
     int raw;
     ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, CURRENT_ADC_CHANNEL, &raw));
 
-    // Voltaje calibrado en mV
-    int voltage_mv;
-    ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc_cali_handle, raw, &voltage_mv));
-    float voltage_v = voltage_mv / 1000.0f;
+    // corriente calibrada en mV
+    int current_mv;
+    ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc_cali_handle, raw, &current_mv));
+    float current_v = current_mv / 1000.0f;
 
     // fórmula para ACS712 (1.65V = 0A, 66mV/A para acs de 30A)
-    return (voltage_v - 1.65f) / ACS712_SENSITIVITY;
+    return (current_v - 1.65f) / ACS712_SENSITIVITY;
 }
