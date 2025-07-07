@@ -16,15 +16,18 @@ typedef struct {
     uint8_t char_count;
 } font_t;
 
+/*
 //8 Colores 3bit code
 #define COLOR_BLACK    0b00000000//x0000
 #define COLOR_WHITE    0b00111111//0xFFFF
-#define COLOR_RED      0b00100100//0xF800
+#define COLOR_RED      0b00000100//0b00100100//0xF800
 #define COLOR_GREEN    0b00010010//0x07E0
 #define COLOR_BLUE     0b00001001//0x001F
 #define COLOR_YELLOW   0b00110110//0xFFE0
 #define COLOR_CYAN     0b00011011//0x07FF
 #define COLOR_MAGENTA  0b00101101//0xF81F
+*/
+
 
 
 

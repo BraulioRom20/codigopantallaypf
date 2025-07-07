@@ -12,9 +12,9 @@
 
 #define PIN_SPI_MOSI 23
 #define PIN_SPI_CLK  18
-#define PIN_SPI_CS   5
+#define PIN_SPI_CS   4
 #define PIN_SPI_DC   19
-#define PIN_SPI_RST  17
+#define PIN_SPI_RST  15//17
 
 // Tamaño del display
 #define DISPLAY_WIDTH  320
@@ -37,10 +37,10 @@ static uint8_t PIXEL_FORMAT_3BIT[1] = {0x01};
 //buffer para cargar pixels(con espacio dinamico)
 static uint8_t *s_pixel_buffer = NULL;
 
-// Colores básicos (formato 8colores)
+// Colores básicos (formato 8colores) --- RGB.
 #define COLOR_BLACK    0b00000000//x0000
 #define COLOR_WHITE    0b00111111//0xFFFF
-#define COLOR_RED      0b00100100//0xF800
+#define COLOR_RED      0b00100100//0b00100100//0xF800
 #define COLOR_GREEN    0b00010010//0x07E0
 #define COLOR_BLUE     0b00001001//0x001F
 #define COLOR_YELLOW   0b00110110//0xFFE0
