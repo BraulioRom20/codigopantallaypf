@@ -40,7 +40,7 @@ void adc_init(void) {
 
 float read_voltage(void) {
     // medición por oneshot
-    voltage_mv =0; int raw = 0;
+    voltage_mv =0; raw = 0;
 
     ESP_ERROR_CHECK(adc_oneshot_read(adc_oneshot_handle, VOLTAGE_ADC_CHANNEL, &raw));
 
@@ -54,13 +54,15 @@ float read_current(void) {
     // medición por oneshot
 
     // medicion de corriente calibrada en mV
-    current_acs = 0; int raw = 0;
+    current = 0; raw = 0;
     
     ESP_ERROR_CHECK(adc_oneshot_read(adc_oneshot_handle, CURRENT_ADC_CHANNEL, &raw));
     
-    ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc_cali_handle, raw, &current_acs));
-    current_acs = current_acs / 1000.0f;
-
-    // fórmula para ACS712 (1.65V = 0A, 66mV/A para acs de 30A)
-    return (current_acs - 1.65f) / ACS712_SENSITIVITY;
+    ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc_cali_handle, raw, &current));
+    
+    // RSHUNT LOGIC 75mv per amper.
+    ///
+    ///
+    current = (current / 1000.0f) * VOLTAGE_DIVIDER_RATIO;  // Convierte a Voltios
+    return current / SHUNT_RESOLUTION;
 }

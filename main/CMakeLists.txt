@@ -1,3 +1,3 @@
 idf_component_register(SRCS  "main.cpp" 
                     INCLUDE_DIRS "."
-                    REQUIRES mpu6050 display gps lora adc TFT_eSPI arduino)
+                    REQUIRES display gps LoRa adc TFT_eSPI arduino Decoder ESP32Servo PID_Servo)

@@ -7,11 +7,6 @@
 #include "esp_zigbee_cluster.h"
 #include "zcl/esp_zigbee_zcl_power_config.h"
 
-bool ZigbeeEP::_is_bound = false;
-bool ZigbeeEP::_allow_multiple_binding = false;
-
-//TODO: is_bound and allow_multiple_binding to make not static
-
 /* Zigbee End Device Class */
 ZigbeeEP::ZigbeeEP(uint8_t endpoint) {
   _endpoint = endpoint;
@@ -19,7 +14,12 @@ ZigbeeEP::ZigbeeEP(uint8_t endpoint) {
   _ep_config.endpoint = 0;
   _cluster_list = nullptr;
   _on_identify = nullptr;
+  _read_model = NULL;
+  _read_manufacturer = NULL;
   _time_status = 0;
+  _is_bound = false;
+  _use_manual_binding = false;
+  _allow_multiple_binding = false;
   if (!lock) {
     lock = xSemaphoreCreateBinary();
     if (lock == NULL) {
@@ -33,16 +33,23 @@ void ZigbeeEP::setVersion(uint8_t version) {
 }
 
 bool ZigbeeEP::setManufacturerAndModel(const char *name, const char *model) {
+  // Allocate a new array of size length + 2 (1 for the length, 1 for null terminator)
+  char zb_name[ZB_MAX_NAME_LENGTH + 2];
+  char zb_model[ZB_MAX_NAME_LENGTH + 2];
+
   // Convert manufacturer to ZCL string
   size_t name_length = strlen(name);
   size_t model_length = strlen(model);
-  if (name_length > 32 || model_length > 32) {
+  if (name_length > ZB_MAX_NAME_LENGTH || model_length > ZB_MAX_NAME_LENGTH) {
     log_e("Manufacturer or model name is too long");
     return false;
   }
-  // Allocate a new array of size length + 2 (1 for the length, 1 for null terminator)
-  char *zb_name = new char[name_length + 2];
-  char *zb_model = new char[model_length + 2];
+  // Get and check the basic cluster
+  esp_zb_attribute_list_t *basic_cluster = esp_zb_cluster_list_get_cluster(_cluster_list, ESP_ZB_ZCL_CLUSTER_ID_BASIC, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
+  if (basic_cluster == nullptr) {
+    log_e("Failed to get basic cluster");
+    return false;
+  }
   // Store the length as the first element
   zb_name[0] = static_cast<char>(name_length);  // Cast size_t to char
   zb_model[0] = static_cast<char>(model_length);
@@ -52,9 +59,7 @@ bool ZigbeeEP::setManufacturerAndModel(const char *name, const char *model) {
   // Null-terminate the array
   zb_name[name_length + 1] = '\0';
   zb_model[model_length + 1] = '\0';
-
-  // Get the basic cluster and update the manufacturer and model attributes
-  esp_zb_attribute_list_t *basic_cluster = esp_zb_cluster_list_get_cluster(_cluster_list, ESP_ZB_ZCL_CLUSTER_ID_BASIC, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
+  // Update the manufacturer and model attributes
   esp_err_t ret_name = esp_zb_basic_cluster_add_attr(basic_cluster, ESP_ZB_ZCL_ATTR_BASIC_MANUFACTURER_NAME_ID, (void *)zb_name);
   if (ret_name != ESP_OK) {
     log_e("Failed to set manufacturer: 0x%x: %s", ret_name, esp_err_to_name(ret_name));
@@ -63,12 +68,10 @@ bool ZigbeeEP::setManufacturerAndModel(const char *name, const char *model) {
   if (ret_model != ESP_OK) {
     log_e("Failed to set model: 0x%x: %s", ret_model, esp_err_to_name(ret_model));
   }
-  delete[] zb_name;
-  delete[] zb_model;
   return ret_name == ESP_OK && ret_model == ESP_OK;
 }
 
-bool ZigbeeEP::setPowerSource(zb_power_source_t power_source, uint8_t battery_percentage) {
+bool ZigbeeEP::setPowerSource(zb_power_source_t power_source, uint8_t battery_percentage, uint8_t battery_voltage) {
   esp_zb_attribute_list_t *basic_cluster = esp_zb_cluster_list_get_cluster(_cluster_list, ESP_ZB_ZCL_CLUSTER_ID_BASIC, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
   esp_err_t ret = esp_zb_cluster_update_attr(basic_cluster, ESP_ZB_ZCL_ATTR_BASIC_POWER_SOURCE_ID, (void *)&power_source);
   if (ret != ESP_OK) {
@@ -86,6 +89,11 @@ bool ZigbeeEP::setPowerSource(zb_power_source_t power_source, uint8_t battery_pe
     ret = esp_zb_power_config_cluster_add_attr(power_config_cluster, ESP_ZB_ZCL_ATTR_POWER_CONFIG_BATTERY_PERCENTAGE_REMAINING_ID, (void *)&battery_percentage);
     if (ret != ESP_OK) {
       log_e("Failed to add battery percentage attribute: 0x%x: %s", ret, esp_err_to_name(ret));
+      return false;
+    }
+    ret = esp_zb_power_config_cluster_add_attr(power_config_cluster, ESP_ZB_ZCL_ATTR_POWER_CONFIG_BATTERY_VOLTAGE_ID, (void *)&battery_voltage);
+    if (ret != ESP_OK) {
+      log_e("Failed to add battery voltage attribute: 0x%x: %s", ret, esp_err_to_name(ret));
       return false;
     }
     ret = esp_zb_cluster_list_add_power_config_cluster(_cluster_list, power_config_cluster, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
@@ -120,9 +128,24 @@ bool ZigbeeEP::setBatteryPercentage(uint8_t percentage) {
   return true;
 }
 
+bool ZigbeeEP::setBatteryVoltage(uint8_t voltage) {
+  esp_zb_zcl_status_t ret = ESP_ZB_ZCL_STATUS_SUCCESS;
+  esp_zb_lock_acquire(portMAX_DELAY);
+  ret = esp_zb_zcl_set_attribute_val(
+    _endpoint, ESP_ZB_ZCL_CLUSTER_ID_POWER_CONFIG, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE, ESP_ZB_ZCL_ATTR_POWER_CONFIG_BATTERY_VOLTAGE_ID, &voltage, false
+  );
+  esp_zb_lock_release();
+  if (ret != ESP_ZB_ZCL_STATUS_SUCCESS) {
+    log_e("Failed to set battery voltage: 0x%x: %s", ret, esp_zb_zcl_status_to_name(ret));
+    return false;
+  }
+  log_v("Battery voltage updated");
+  return true;
+}
+
 bool ZigbeeEP::reportBatteryPercentage() {
   /* Send report attributes command */
-  esp_zb_zcl_report_attr_cmd_t report_attr_cmd;
+  esp_zb_zcl_report_attr_cmd_t report_attr_cmd = {0};
   report_attr_cmd.address_mode = ESP_ZB_APS_ADDR_MODE_DST_ADDR_ENDP_NOT_PRESENT;
   report_attr_cmd.attributeID = ESP_ZB_ZCL_ATTR_POWER_CONFIG_BATTERY_PERCENTAGE_REMAINING_ID;
   report_attr_cmd.direction = ESP_ZB_ZCL_CMD_DIRECTION_TO_CLI;
@@ -143,7 +166,7 @@ bool ZigbeeEP::reportBatteryPercentage() {
 
 char *ZigbeeEP::readManufacturer(uint8_t endpoint, uint16_t short_addr, esp_zb_ieee_addr_t ieee_addr) {
   /* Read peer Manufacture Name & Model Identifier */
-  esp_zb_zcl_read_attr_cmd_t read_req;
+  esp_zb_zcl_read_attr_cmd_t read_req = {0};
 
   if (short_addr != 0) {
     read_req.address_mode = ESP_ZB_APS_ADDR_MODE_16_ENDP_PRESENT;
@@ -160,13 +183,13 @@ char *ZigbeeEP::readManufacturer(uint8_t endpoint, uint16_t short_addr, esp_zb_i
   uint16_t attributes[] = {
     ESP_ZB_ZCL_ATTR_BASIC_MANUFACTURER_NAME_ID,
   };
-  read_req.attr_number = ZB_ARRAY_LENTH(attributes);
+  read_req.attr_number = ZB_ARRAY_LENGHT(attributes);
   read_req.attr_field = attributes;
 
-  if (_read_manufacturer != nullptr) {
+  if (_read_manufacturer != NULL) {
     free(_read_manufacturer);
   }
-  _read_manufacturer = nullptr;
+  _read_manufacturer = NULL;
 
   esp_zb_lock_acquire(portMAX_DELAY);
   esp_zb_zcl_read_attr_cmd_req(&read_req);
@@ -181,7 +204,7 @@ char *ZigbeeEP::readManufacturer(uint8_t endpoint, uint16_t short_addr, esp_zb_i
 
 char *ZigbeeEP::readModel(uint8_t endpoint, uint16_t short_addr, esp_zb_ieee_addr_t ieee_addr) {
   /* Read peer Manufacture Name & Model Identifier */
-  esp_zb_zcl_read_attr_cmd_t read_req;
+  esp_zb_zcl_read_attr_cmd_t read_req = {0};
 
   if (short_addr != 0) {
     read_req.address_mode = ESP_ZB_APS_ADDR_MODE_16_ENDP_PRESENT;
@@ -198,13 +221,13 @@ char *ZigbeeEP::readModel(uint8_t endpoint, uint16_t short_addr, esp_zb_ieee_add
   uint16_t attributes[] = {
     ESP_ZB_ZCL_ATTR_BASIC_MODEL_IDENTIFIER_ID,
   };
-  read_req.attr_number = ZB_ARRAY_LENTH(attributes);
+  read_req.attr_number = ZB_ARRAY_LENGHT(attributes);
   read_req.attr_field = attributes;
 
-  if (_read_model != nullptr) {
+  if (_read_model != NULL) {
     free(_read_model);
   }
-  _read_model = nullptr;
+  _read_model = NULL;
 
   esp_zb_lock_acquire(portMAX_DELAY);
   esp_zb_zcl_read_attr_cmd_req(&read_req);
@@ -245,20 +268,28 @@ void ZigbeeEP::zbReadBasicCluster(const esp_zb_zcl_attribute_t *attribute) {
   /* Basic cluster attributes */
   if (attribute->id == ESP_ZB_ZCL_ATTR_BASIC_MANUFACTURER_NAME_ID && attribute->data.type == ESP_ZB_ZCL_ATTR_TYPE_CHAR_STRING && attribute->data.value) {
     zbstring_t *zbstr = (zbstring_t *)attribute->data.value;
-    char *string = (char *)malloc(zbstr->len + 1);
-    memcpy(string, zbstr->data, zbstr->len);
-    string[zbstr->len] = '\0';
-    log_i("Peer Manufacturer is \"%s\"", string);
-    _read_manufacturer = string;
+    _read_manufacturer = (char *)malloc(zbstr->len + 1);
+    if (_read_manufacturer == NULL) {
+      log_e("Failed to allocate memory for manufacturer data");
+      xSemaphoreGive(lock);
+      return;
+    }
+    memcpy(_read_manufacturer, zbstr->data, zbstr->len);
+    _read_manufacturer[zbstr->len] = '\0';
+    log_i("Peer Manufacturer is \"%s\"", _read_manufacturer);
     xSemaphoreGive(lock);
   }
   if (attribute->id == ESP_ZB_ZCL_ATTR_BASIC_MODEL_IDENTIFIER_ID && attribute->data.type == ESP_ZB_ZCL_ATTR_TYPE_CHAR_STRING && attribute->data.value) {
     zbstring_t *zbstr = (zbstring_t *)attribute->data.value;
-    char *string = (char *)malloc(zbstr->len + 1);
-    memcpy(string, zbstr->data, zbstr->len);
-    string[zbstr->len] = '\0';
-    log_i("Peer Model is \"%s\"", string);
-    _read_model = string;
+    _read_model = (char *)malloc(zbstr->len + 1);
+    if (_read_model == NULL) {
+      log_e("Failed to allocate memory for model data");
+      xSemaphoreGive(lock);
+      return;
+    }
+    memcpy(_read_model, zbstr->data, zbstr->len);
+    _read_model[zbstr->len] = '\0';
+    log_i("Peer Model is \"%s\"", _read_model);
     xSemaphoreGive(lock);
   }
 }
@@ -344,7 +375,7 @@ bool ZigbeeEP::setTimezone(int32_t gmt_offset) {
 
 tm ZigbeeEP::getTime(uint8_t endpoint, int32_t short_addr, esp_zb_ieee_addr_t ieee_addr) {
   /* Read peer time */
-  esp_zb_zcl_read_attr_cmd_t read_req;
+  esp_zb_zcl_read_attr_cmd_t read_req = {0};
 
   if (short_addr >= 0) {
     read_req.address_mode = ESP_ZB_APS_ADDR_MODE_16_ENDP_PRESENT;
@@ -355,7 +386,7 @@ tm ZigbeeEP::getTime(uint8_t endpoint, int32_t short_addr, esp_zb_ieee_addr_t ie
   }
 
   uint16_t attributes[] = {ESP_ZB_ZCL_ATTR_TIME_TIME_ID};
-  read_req.attr_number = ZB_ARRAY_LENTH(attributes);
+  read_req.attr_number = ZB_ARRAY_LENGHT(attributes);
   read_req.attr_field = attributes;
 
   read_req.clusterID = ESP_ZB_ZCL_CLUSTER_ID_TIME;
@@ -396,7 +427,7 @@ tm ZigbeeEP::getTime(uint8_t endpoint, int32_t short_addr, esp_zb_ieee_addr_t ie
 
 int32_t ZigbeeEP::getTimezone(uint8_t endpoint, int32_t short_addr, esp_zb_ieee_addr_t ieee_addr) {
   /* Read peer timezone */
-  esp_zb_zcl_read_attr_cmd_t read_req;
+  esp_zb_zcl_read_attr_cmd_t read_req = {0};
 
   if (short_addr >= 0) {
     read_req.address_mode = ESP_ZB_APS_ADDR_MODE_16_ENDP_PRESENT;
@@ -407,7 +438,7 @@ int32_t ZigbeeEP::getTimezone(uint8_t endpoint, int32_t short_addr, esp_zb_ieee_
   }
 
   uint16_t attributes[] = {ESP_ZB_ZCL_ATTR_TIME_TIME_ZONE_ID};
-  read_req.attr_number = ZB_ARRAY_LENTH(attributes);
+  read_req.attr_number = ZB_ARRAY_LENGHT(attributes);
   read_req.attr_field = attributes;
 
   read_req.clusterID = ESP_ZB_ZCL_CLUSTER_ID_TIME;
@@ -512,7 +543,7 @@ static void findOTAServer(esp_zb_zdp_status_t zdo_status, uint16_t addr, uint8_t
 }
 
 void ZigbeeEP::requestOTAUpdate() {
-  esp_zb_zdo_match_desc_req_param_t req;
+  esp_zb_zdo_match_desc_req_param_t req = {0};
   uint16_t cluster_list[] = {ESP_ZB_ZCL_CLUSTER_ID_OTA_UPGRADE};
 
   /* Match the OTA server of coordinator */
@@ -527,6 +558,54 @@ void ZigbeeEP::requestOTAUpdate() {
     esp_zb_zdo_match_cluster(&req, findOTAServer, &_endpoint);
   }
   esp_zb_lock_release();
+}
+
+void ZigbeeEP::removeBoundDevice(uint8_t endpoint, esp_zb_ieee_addr_t ieee_addr) {
+  log_d(
+    "Attempting to remove device with endpoint %d and IEEE address %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x", endpoint, ieee_addr[7], ieee_addr[6], ieee_addr[5],
+    ieee_addr[4], ieee_addr[3], ieee_addr[2], ieee_addr[1], ieee_addr[0]
+  );
+
+  for (std::list<zb_device_params_t *>::iterator it = _bound_devices.begin(); it != _bound_devices.end(); ++it) {
+    if ((*it)->endpoint == endpoint && memcmp((*it)->ieee_addr, ieee_addr, sizeof(esp_zb_ieee_addr_t)) == 0) {
+      log_d("Found matching device, removing it");
+      _bound_devices.erase(it);
+      if (_bound_devices.empty()) {
+        _is_bound = false;
+      }
+      return;
+    }
+  }
+  log_w("No matching device found for removal");
+}
+
+void ZigbeeEP::removeBoundDevice(zb_device_params_t *device) {
+  if (!device) {
+    log_e("Invalid device parameters provided");
+    return;
+  }
+
+  log_d(
+    "Attempting to remove device with endpoint %d, short address 0x%04x, IEEE address %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x", device->endpoint,
+    device->short_addr, device->ieee_addr[7], device->ieee_addr[6], device->ieee_addr[5], device->ieee_addr[4], device->ieee_addr[3], device->ieee_addr[2],
+    device->ieee_addr[1], device->ieee_addr[0]
+  );
+
+  for (std::list<zb_device_params_t *>::iterator it = _bound_devices.begin(); it != _bound_devices.end(); ++it) {
+    bool endpoint_matches = ((*it)->endpoint == device->endpoint);
+    bool short_addr_matches = (device->short_addr != 0xFFFF && (*it)->short_addr == device->short_addr);
+    bool ieee_addr_matches = (memcmp((*it)->ieee_addr, device->ieee_addr, sizeof(esp_zb_ieee_addr_t)) == 0);
+
+    if (endpoint_matches && (short_addr_matches || ieee_addr_matches)) {
+      log_d("Found matching device by %s, removing it", short_addr_matches ? "short address" : "IEEE address");
+      _bound_devices.erase(it);
+      if (_bound_devices.empty()) {
+        _is_bound = false;
+      }
+      return;
+    }
+  }
+  log_w("No matching device found for removal");
 }
 
 const char *ZigbeeEP::esp_zb_zcl_status_to_name(esp_zb_zcl_status_t status) {

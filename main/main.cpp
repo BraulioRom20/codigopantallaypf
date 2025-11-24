@@ -1,93 +1,304 @@
 #include <stdio.h>
-#include <display.h>
-#include "lora.h"
 #include "neo6m.h"
 #include "adcfunction.h"
 #include "Arduino.h"
+#include "windows.h"
 #include <SPI.h>
+#include <src/LoRa.h>
+#include "definitions.h"
+#include "ESP32Servo.h"
+#include "PID_Servo.h"
 
-#include <TFT_eSPI.h> // Hardware-specific library
+//Parameters vars:
 
-TFT_eSPI tft = TFT_eSPI();       // Invoke custom library
+float tension; float corriente; float capacidad;  bool launchControl; bool estadoDelGps;
 
-#define TFT_GREY 0x5AEB // New colour
+//GPS vars:
 
+double latitude; double longitude; char lat_hemisphere; char lon_hemisphere; float velocidad;
 
-extern "C" void app_main()
-{
-    //display_init();
+//DISPLAY VAR
 
-    tft.init();
-  tft.setRotation(2);
-  while(1){
-    // Fill screen with random colour so we can see the effect of printing with and without 
-  // a background colour defined
-  tft.fillScreen(random(0xFFFF));
-  
-  // Set "cursor" at top left corner of display (0,0) and select font 2
-  // (cursor will move to next line automatically during printing with 'tft.println'
-  //  or stay on the line is there is room for the text with tft.print)
-  tft.setCursor(0, 0, 2);
-  // Set the font colour to be white with a black background, set text size multiplier to 1
-  tft.setTextColor(TFT_WHITE,TFT_BLACK);  tft.setTextSize(1);
-  // We can now plot text on screen using the "print" class
-  tft.println("Hello World!");
-  
-  // Set the font colour to be yellow with no background, set to font 7
-  tft.setTextColor(TFT_YELLOW); tft.setTextFont(7);
-  tft.println(1234.56);
-  
-  // Set the font colour to be red with black background, set to font 4
-  tft.setTextColor(TFT_RED,TFT_BLACK);    tft.setTextFont(4);
-  tft.println((long)3735928559, HEX); // Should print DEADBEEF
+uint8_t windowMode = 0;
 
-  // Set the font colour to be green with black background, set to font 4
-  tft.setTextColor(TFT_GREEN,TFT_BLACK);
-  tft.setTextFont(4);
-  tft.println("Groop");
-  tft.println("I implore thee,");
+//auto-pilot var
 
-  // Change to font 2
-  tft.setTextFont(2);
-  tft.println(F("my foonting turlingdromes.")); // Can store strings in FLASH to save RAM
-  tft.println("And hooptiously drangle me");
-  tft.println("with crinkly bindlewurdles,");
-  // This next line is deliberately made too long for the display width to test
-  // automatic text wrapping onto the next line
-  tft.println("Or I will rend thee in the gobberwarts with my blurglecruncheon, see if I don't!");
-  
-  // Test some print formatting functions
-  float fnumber = 123.45;
-   // Set the font colour to be blue with no background, set to font 4
-  tft.setTextColor(TFT_BLUE);    tft.setTextFont(4);
-  tft.print("Float = "); tft.println(fnumber);           // Print floating point number
-  tft.print("Binary = "); tft.println((int)fnumber, BIN); // Print as integer value in binary
-  tft.print("Hexadecimal = "); tft.println((int)fnumber, HEX); // Print as integer number in Hexadecimal
-  delay(10000);
-  }
-}
+bool AutoPilot = false;
 
 /*
-// 3. Inicialización MPU6050
-    ESP_LOGI(TAG, "Inicializando MPU6050...");
-    if(mpu6050_init(I2C_NUM_0) != ESP_OK) {
-        ESP_LOGE(TAG, "Error inicializando MPU6050");
-        return;
-    }
 
-    // 4. Bucle principal
-    mpu6050_data_t data;
-    while(1) {
-        if(mpu6050_read(&data, I2C_NUM_0) == ESP_OK) {
-            ESP_LOGI(TAG, "Acelerómetro: X=%d Y=%d Z=%d | Giroscopio: X=%d Y=%d Z=%d",
-                    data.ax, data.ay, data.az,
-                    data.gx, data.gy, data.gz);
-        }
-        vTaskDelay(pdMS_TO_TICKS(500)); // 500ms entre lecturas
-    }
+  BUTTONS INTERRUPTS:
+
+*/
+
+// Interrupt Service Routines (ISRs)
+void IRAM_ATTR handleButton1() {
+  button1Pressed = true;
+  //Serial.println("hola");
+}
+
+void IRAM_ATTR handleButton2() {
+  button2Pressed = true;
+}
+
+void IRAM_ATTR handleButton3() {
+  button3Pressed = true;
+}
+
+void init_interruptions() {
+
+  // Configure button pins as input with pull-up resistor
+  pinMode(buttonPin1, INPUT_PULLUP);
+  pinMode(buttonPin2, INPUT_PULLDOWN);
+  pinMode(buttonPin3, INPUT_PULLDOWN);
+
+  pinMode(2, OUTPUT);
+
+
+  // Attach interrupts
+  attachInterrupt(digitalPinToInterrupt(buttonPin1), handleButton1, FALLING);  // FALLING if using INPUT_PULLUP
+  attachInterrupt(digitalPinToInterrupt(buttonPin2), handleButton2, RISING);
+  //attachInterrupt(digitalPinToInterrupt(buttonPin3), handleButton3, RISING);
+
+  //BOCINA
+
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << BUZZER_PIN),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE
+    };
+
+    gpio_config(&io_conf);
+}
+
+///////////////////////////////////////////////////////////////////////////////////
+
+/*
+  PARALLEL TASK
+
+
+  //Read BAT, GPS and send it .
 
 
 */
+
+
+void telemetryRead(void  *pvParameters){
+    
+    raw_nmea(&latitude,&longitude,&lat_hemisphere,&lon_hemisphere,&velocidad);
+    //-------read voltage and current and batterys percent
+
+
+    //DEBUG
+    //ESP_LOGI(TAG,"lat: %lf / %c ^^ lon; %lf / %c",latitude,lat_hemisphere,longitude,lon_hemisphere);  
+    //ESP_LOGI(TAG,"velocity: %lf",speedKmh);
+    
+    //SEND DATA
+
+    /*
+    LoRa.beginPacket();
+    LoRa.print("hello");
+    LoRa.endPacket();
+    */
+    
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+//////////////////////////////////////////////////////////////////////////////////////
+/*
+
+  *SETUP*
+
+*/
+
+
+extern "C" void app_main()  {
+  delay(1000);//DESP. SACAR
+
+  //init serial for debuging
+  Serial.begin(115200);
+  Serial.println("SERIAL OK");
+
+  init_interruptions();
+  Serial.println("INTERRUPTIONS OK");
+
+  //INIT DISPLAY
+
+  //***************** TFT_eSPI tft = TFT_eSPI();       // Invoke custom library
+  
+  //GPS
+  gps_starting();//avoid using gps_starting() again until and unless driver is not de-inited properly.
+  ESP_LOGI("GPS", "OK");
+
+
+	//LORA TX:
+
+  /*
+    ****************************************************
+    pinMode(5,OUTPUT);
+  SPI.begin(LORA_SCK,LORA_MISO,LORA_MOSI,LORA_SS);
+  LoRa.setPins(LORA_SS, LORA_RST, LORA_DIO0);
+  
+  if (!LoRa.begin(433E6)) {
+    Serial.println("LoRa init failed. Check your connections and frequency!");
+    while (true); // Halt execution
+  }else{Serial.println("LoRa OK");}
+
+  */
+  
+  
+  //SERVO
+  servo_init(); 
+  Serial.println("SERVO OK");
+
+  /*
+    PARALLEL TASK ATTACH
+
+
+    xTaskCreatePinnedToCore(
+        telemetryRead,     
+        "telemetry",        
+        2048,                  // Stack size
+        NULL,                  // Parameter
+        5,                     // Priority
+        NULL,                  // Task handle
+        1                      // Core 0 or 1
+    );
+
+  */
+    
+    
+
+
+
+
+  
+ 
+  /*
+    MAIN TASK
+  */
+
+  while(1){
+    /*
+
+    Window change:
+
+
+    if(windowMode == 0){
+      print_page_all_parameters( tension,  corriente,  capacidad,  velocidad,   velocidadCruceroActiva,   launchControl,  estadoDelGps);
+    }else{print_tachometer();}
+    */
+    
+    /*
+
+    BUTTON 1 BUTTON 2
+
+      if (!button1Pressed) {
+      button1Pressed = false;
+      Serial.println("Button 1 was pressed!");
+      //active horn
+      analogWrite(BUZZER_PIN,128);
+    }else{
+      analogWrite(BUZZER_PIN,0);
+    }
+
+    if (!button2Pressed) {
+      button2Pressed = false;
+      Serial.println("Button 2 was pressed!");
+      //change window
+      windowMode = 1 - windowMode;
+    }
+
+
+    */
+    
+    
+    //raw_nmea(&latitude,&longitude,&lat_hemisphere,&lon_hemisphere,&velocidad);  
+
+    /*
+      if (!button3Pressed) {
+      button3Pressed = false;
+      Serial.println("Button 3 was pressed!(autopilot state changed)");
+      //active or desactive automatic pilot
+      AutoPilot = !AutoPilot;
+    }
+    */
+    test_servo();
+    
+    if(digitalRead(buttonPin3)){
+      //button3Pressed = false;
+      Serial.println("Button 3 was pressed!(autopilot state changed)");
+      //active or desactive automatic pilot
+      AutoPilot = !AutoPilot;
+      
+    }
+
+    if(AutoPilot == true){
+      velocidad_crucero(velocidad);
+      digitalWrite(2,HIGH);
+    }else{
+      digitalWrite(2,LOW);
+    }
+
+  delay(1000);
+  }
+}  
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+/*
+while(1){
+    uint16_t angle = random(241); // random speed in range 0 to 240
+
+    // Plot needle at random angle in range 0 to 240, speed 40ms per -increment
+    plotNeedle(angle, 0);
+  
+    // Pause at new position
+    delay(2500);
+  
+}
+    */
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 /*  
  Test the tft.print() viz. the libraries embedded write() function
@@ -101,4 +312,3 @@ extern "C" void app_main()
   ###### DON'T FORGET TO UPDATE THE User_Setup.h FILE IN THE LIBRARY ######
   #########################################################################
  */
-

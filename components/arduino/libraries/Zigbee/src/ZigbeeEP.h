@@ -12,7 +12,7 @@
 #define ZB_CMD_TIMEOUT             10000     // 10 seconds
 #define OTA_UPGRADE_QUERY_INTERVAL (1 * 60)  // 1 hour = 60 minutes
 
-#define ZB_ARRAY_LENTH(arr) (sizeof(arr) / sizeof(arr[0]))
+#define ZB_ARRAY_LENGHT(arr) (sizeof(arr) / sizeof(arr[0]))
 
 #define RGB_TO_XYZ(r, g, b, X, Y, Z)                               \
   {                                                                \
@@ -41,6 +41,10 @@ typedef enum {
 /* Zigbee End Device Class */
 class ZigbeeEP {
 public:
+  // constants and limits
+  static constexpr size_t ZB_MAX_NAME_LENGTH = 32;
+
+  // constructors and destructor
   ZigbeeEP(uint8_t endpoint = 10);
   ~ZigbeeEP() {}
 
@@ -62,11 +66,14 @@ public:
     return _bound_devices;
   }
 
-  static bool bound() {
+  bool bound() {
     return _is_bound;
   }
-  static void allowMultipleBinding(bool bind) {
+  void allowMultipleBinding(bool bind) {
     _allow_multiple_binding = bind;
+  }
+  void setManualBinding(bool bind) {
+    _use_manual_binding = bind;
   }
 
   // Set Manufacturer name and model
@@ -77,9 +84,10 @@ public:
   char *readModel(uint8_t endpoint, uint16_t short_addr, esp_zb_ieee_addr_t ieee_addr);
 
   // Set Power source and battery percentage for battery powered devices
-  bool setPowerSource(zb_power_source_t power_source, uint8_t percentage = 255);
-  bool setBatteryPercentage(uint8_t percentage);
-  bool reportBatteryPercentage();
+  bool setPowerSource(zb_power_source_t power_source, uint8_t percentage = 0xff, uint8_t voltage = 0xff);  // voltage in 100mV
+  bool setBatteryPercentage(uint8_t percentage);                                                           // 0-100 %
+  bool setBatteryVoltage(uint8_t voltage);                                                                 // voltage in 100mV (example value 35 for 3.5V)
+  bool reportBatteryPercentage();                                                                          // battery voltage is not reportable attribute
 
   // Set time
   bool addTimeCluster(tm time = {}, int32_t gmt_offset = 0);  // gmt offset in seconds
@@ -92,6 +100,9 @@ public:
 
   bool epAllowMultipleBinding() {
     return _allow_multiple_binding;
+  }
+  bool epUseManualBinding() {
+    return _use_manual_binding;
   }
 
   // OTA methods
@@ -120,7 +131,7 @@ public:
 
   // list of all handlers function calls, to be override by EPs implementation
   virtual void zbAttributeSet(const esp_zb_zcl_set_attr_value_message_t *message) {};
-  virtual void zbAttributeRead(uint16_t cluster_id, const esp_zb_zcl_attribute_t *attribute) {};
+  virtual void zbAttributeRead(uint16_t cluster_id, const esp_zb_zcl_attribute_t *attribute, uint8_t src_endpoint, esp_zb_zcl_addr_t src_address) {};
   virtual void zbReadBasicCluster(const esp_zb_zcl_attribute_t *attribute);  //already implemented
   virtual void zbIdentify(const esp_zb_zcl_set_attr_value_message_t *message);
   virtual void zbWindowCoveringMovementCmd(const esp_zb_zcl_window_covering_movement_message_t *message) {};
@@ -131,6 +142,14 @@ public:
   virtual void addBoundDevice(zb_device_params_t *device) {
     _bound_devices.push_back(device);
     _is_bound = true;
+  }
+
+  virtual void removeBoundDevice(uint8_t endpoint, esp_zb_ieee_addr_t ieee_addr);
+  virtual void removeBoundDevice(zb_device_params_t *device);
+
+  virtual void clearBoundDevices() {
+    _bound_devices.clear();
+    _is_bound = false;
   }
 
   void onIdentify(void (*callback)(uint16_t)) {
@@ -152,8 +171,9 @@ protected:
   esp_zb_ha_standard_devices_t _device_id;
   esp_zb_endpoint_config_t _ep_config;
   esp_zb_cluster_list_t *_cluster_list;
-  static bool _is_bound;
-  static bool _allow_multiple_binding;
+  bool _is_bound;
+  bool _allow_multiple_binding;
+  bool _use_manual_binding;
   std::list<zb_device_params_t *> _bound_devices;
   SemaphoreHandle_t lock;
   zb_power_source_t _power_source;

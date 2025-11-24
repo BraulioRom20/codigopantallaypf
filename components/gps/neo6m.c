@@ -1,23 +1,36 @@
 #include "neo6m.h"
-#include <stdint.h>
-#include <stdio.h>
-#include <stdbool.h>
-#include <stdlib.h>
-
-#include <sys/_intsup.h>
-#include <unistd.h>
-#include "driver/uart.h"
-#include "esp_err.h"
-#include "freertos/idf_additions.h"
-#include "hal/uart_types.h"
-#include "portmacro.h"
-#include "esp_log.h"
-#include "string.h"
-#include "math.h"
-
 
 #define BUFFER (1024)
 char buf[BUFFER];
+
+
+float parse_gprmc_speed(const char *nmea_sentence) {
+    if (strstr(nmea_sentence, "$GPRMC") == NULL) return -1;
+
+    char *tokens[12] = {0};
+    char *temp = strdup(nmea_sentence);
+    char *token = strtok(temp, ",");
+
+    int i = 0;
+    while (token != NULL && i < 12) {
+        tokens[i++] = token;
+        token = strtok(NULL, ",");
+    }
+
+    float speed_knots = 0.0;
+    if (i >= 8 && tokens[7] != NULL && strlen(tokens[7]) > 0) {
+        speed_knots = atof(tokens[7]);
+    }
+
+    free(temp);
+
+    // Convert knots to km/h
+    return speed_knots * 1.852;
+}
+
+
+
+
 
 static const char *TAG = "GPS";
 
@@ -35,9 +48,9 @@ double convert_to_decimal_degrees(double raw_coordinate) {
     return degrees + (minutes / 60.0);
 }
 
-void gps_start(void)
+void gps_starting()
 {   
-    const uart_port_t uart_num = UART_NUM_2;
+    const uart_port_t uart_num = UART_NUM_1;
     uart_config_t uart_config = {
         .baud_rate = 9600,
         .data_bits = UART_DATA_8_BITS,
@@ -52,105 +65,42 @@ void gps_start(void)
     
 }
 
-void raw_nmea(void)
+void raw_nmea(double *latitude, double *longitude,char *lat_hemisphere, char *lon_hemisphere, float *speedKmh)
 {
     
-
     memset(buf, 0, BUFFER);
-    //len=0;
-    //ESP_ERROR_CHECK(uart_get_buffered_data_len(UART_NUM_2, (size_t*)&len));
-    //ESP_LOGI(TAG, "LEN: %d", BUFFER);
-    uart_read_bytes(UART_NUM_2, buf,BUFFER, portMAX_DELAY);
-    ESP_LOGI(TAG, "Data: %s", buf);
+
+    uart_read_bytes(UART_NUM_1, buf,BUFFER, portMAX_DELAY);
+    //ESP_LOGI(TAG, "Data: %s", buf);
+    
     //data adquisiton latitude and longtitude
     char lat[12], lon[12];
     // Declare these new char variables to store 'S', 'W', 'N', or 'E'
-    char lat_hemisphere; // Will store 'S' or 'N'
-    char lon_hemisphere; // Will store 'W' or 'E'
+    char lat_h; // Will store 'S' or 'N'
+    char lon_h; // Will store 'W' or 'E'
     
-    const char *start;
+    const char *indexGP;
 
-    start = strstr(buf, "$GPGGA");
-    if (start != NULL) {
-        //sscanf(start, "$GPGGA,%*f,%11[^,],%*c,%11[^,],%*c", lat, lon);
-        sscanf(start, "$GPGGA,%*f,%11[^,],%c,%11[^,],%c", lat, &lat_hemisphere, lon, &lon_hemisphere);
-        //GPGGA,002228.00,3445.30407,S,05816.68935,W,1,06,1.37,38.9,M,13.4,M,,*63
-        ESP_LOGI(TAG,"lat: %s ^^ lon; %s",lat,lon);
-
-
-        double latitude = atof(lat);
-        double longitude = atof(lon);
-        latitude = convert_to_decimal_degrees(latitude);
-        longitude = convert_to_decimal_degrees(longitude);
-        ESP_LOGI(TAG,"lat: %lf ^^ lon; %lf",latitude,longitude);
-        ESP_LOGI(TAG,"lat: %c ^^ lon; %c",lat_hemisphere,lon_hemisphere);
-
-
+    indexGP = strstr(buf, "$GPGGA");
+    
+    if (indexGP != NULL) {
         
+        sscanf(indexGP, "$GPGGA,%*[^,],%11[^,],%c,%11[^,],%c", lat, &lat_h, lon, &lon_h);
+
+        *latitude = convert_to_decimal_degrees(atof(lat));
+        *longitude = convert_to_decimal_degrees(atof(lon));
+
+        *lat_hemisphere = lat_h;
+        *lon_hemisphere = lon_h;
+
+        //ESP_LOGI(TAG,"lat: %lf / %c ^^ lon; %lf / %c",latitude,lat_hemisphere,longitude,lon_hemisphere);       
     }
 
-   vTaskDelay(1000);
-}
+    indexGP = strstr(buf, "$GPRMC");
 
-
-
-
-
-
-
-
-
-void parse_nmea(const char *buf, char *latitude, char *longitude) {
-    const char *start;
-    char lat[12], lon[12];
-
-  
-    start = strstr(buf, "$GPGGA");
-    if (start != NULL) {
-        sscanf(start, "$GPGGA,%*f,%11[^,],%*c,%11[^,],%*c", lat, lon);
-        sprintf(latitude, "%s", lat);
-        sprintf(longitude, "%s", lon);
+    if(indexGP != NULL){
+        *speedKmh = parse_gprmc_speed(indexGP);
+    
     }
 }
 
-
-
-
-
-
-
-
-
-
-void lat_long(void)
-{
-    
-    char lat[12];
-    char lon[12];
-    void parse_nmea(const char *buf, char *lat, char *lon);
-    ESP_LOGI(TAG, "Latitude is:%s\n", lat);
-    ESP_LOGI(TAG, "Longitude is:%s\n", lon);
-  }
-
-void time(void)
-{
-    
-    char time[20];
-    sscanf(buf, "$GPRMC,%10[^,]", time); 
-    ESP_LOGI(TAG, "Time is %s", time); 
-    memset(time, 0, 20);
-}
-
-void speed_course(void)
-{
-    
-    float speedKmh;
-    float course;
-    sscanf(buf, "$GPVTG,%*f,%*c,%*f,%*c,%*f,%*c,%f", &speedKmh); 
-    sscanf(buf, "$GPVTG,%f", &course); 
-    sscanf(buf, "$GPRMC,%*f,%*c,%*f,%*c,%*f,%*c,%*f,%f", &course); 
-    ESP_LOGI(TAG, "Speed is %f", speedKmh); 
-    ESP_LOGI(TAG, "Course is %f", course); 
-   
-   
-}

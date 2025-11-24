@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "display.c" "fonts.c"
+    SRCS "windows.cpp"
     INCLUDE_DIRS "."
-    REQUIRES driver
+    REQUIRES Decoder driver arduino TFT_eSPI
 )

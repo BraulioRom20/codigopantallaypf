@@ -15,7 +15,8 @@
 
 // factores de conversión
 #define VOLTAGE_DIVIDER_RATIO 11.0f  // (R1+R2)/R2 *(no me acuerdo las resistencia que iban aca)
-#define ACS712_SENSITIVITY 0.066f 
+#define VOLTAGE_DIVIDER_RATIO_I 11.0f //CHANGE
+#define SHUNT_RESOLUTION 0.075
 
 
 #define TAG "ADC"
@@ -24,13 +25,13 @@ static adc_oneshot_unit_handle_t adc_oneshot_handle;
 static adc_cali_handle_t adc_cali_handle = NULL;
 
 
+int raw;
+
 //variables for read voltage
 int voltage_mv;
 
 //variables for read current 
-int current_acs;
-  // 66mV/A para ACS712-30A
-
+int current;
 
 
 void adc_init(void); //inicializacion 
