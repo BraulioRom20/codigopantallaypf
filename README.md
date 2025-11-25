@@ -4,8 +4,11 @@ DESCRIPCIÓN DE LIBRERIAS
 
 Libreria del Display (Manejo del display y fuentes de escritura):
     DISPLAY.c/.h & FONTS.c/.h
+
 Libreria LoRa (Transmisor a Boxes)
+
 Libreria GPS (NEO-6MV2)
+
 Libreria Acelerómetro y Servo (MPU6050)
 
 Info enviada por LoRa a Boxes:
