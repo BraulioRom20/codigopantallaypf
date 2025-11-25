@@ -3,8 +3,7 @@
 Servo motor;
 
 // --- PID parameters ---
-// debido a que la ganancia ultima es muy alta (alcanza los 100) y el periodo ultimo muy bajo (0.125)
-// tomamos la decision de reducir las constantes calculadas a traves del metodo ziegler-nichols
+// constantes calculadas a través del método Tyreus-Luyben
 double Kp = 3.6;
 double Ki = 0.1;
 double Kd = 1.76;
