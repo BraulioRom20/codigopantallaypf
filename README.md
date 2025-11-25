@@ -1,16 +1,14 @@
-Firmware para computadora abordo(Auto_Desafio_eco_YPF)
+Firmware para la Computadora del Auto Desafio ECO YPF 2025
 
-Descripcion librerias:
+DESCRIPCIÓN DE LIBRERIAS
 
-LIBRERIA DISPLAY(Manejo del display y fuentes de escritura):
+Libreria del Display (Manejo del display y fuentes de escritura):
     DISPLAY.c/.h & FONTS.c/.h
-LIBRERIA LORA(Transmisor a receptor en boxes)
-LIBRERIA GPS(NEOV6M)
-LIBRERIA ACELEROMETRO y SERVO(MPU6050)
+Libreria LoRa (Transmisor a Boxes)
+Libreria GPS (NEO-6MV2)
+Libreria Acelerómetro y Servo (MPU6050)
 
-
-Info enviada por Lora a boxes:
-
+Info enviada por LoRa a Boxes:
 latitud
 longitud
 voltaje
